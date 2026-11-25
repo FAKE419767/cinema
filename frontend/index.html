@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Афиша кинотеатра</title>
+  <style>
+    body { font: 1rem system-ui, sans-serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; background: #f3f5f9; color: #182338; }
+    article { background: white; padding: 1rem; margin: 1rem 0; border-radius: 0.5rem; }
+    h2 { margin-top: 0; }
+    button, select { font: inherit; padding: 0.35rem; }
+    select { max-width: 100%; vertical-align: middle; }
+    button { background: #194a83; color: white; border: 0; border-radius: 0.3rem; }
+    button:disabled { opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <h1>Афиша кинотеатра</h1>
+  <p id="status" role="status">Загрузка сеансов…</p>
+  <main id="sessions"></main>
+  <template id="session-card">
+    <article>
+      <h2></h2>
+      <p class="details"></p>
+      <label hidden>
+        Свободные места
+        <select multiple size="4"></select>
+      </label>
+      <button type="button">Брондау</button>
+      <p class="result" role="status"></p>
+    </article>
+  </template>
+  <script>
+    const cinema = '/api/cinema';
+    const pageStatus = document.querySelector('#status');
+    const sessionList = document.querySelector('#sessions');
+    const cardTemplate = document.querySelector('#session-card');
+
+    async function request(url, body) {
+      const options = body === undefined ? {} : {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      };
+      const response = await fetch(url, options);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(typeof error.detail === 'string' ? error.detail : 'HTTP ' + response.status);
+      }
+      return response.json();
+    }
+
+    function showSession(session, movieTitle) {
+      const card = cardTemplate.content.cloneNode(true);
+      card.querySelector('h2').textContent = movieTitle;
+      const start = new Date(session.start_time).toLocaleString('ru-RU');
+      card.querySelector('.details').textContent = `Зал ${session.hall} · ${start} · ${session.price} ₸`;
+      const label = card.querySelector('label');
+      const places = card.querySelector('select');
+      const button = card.querySelector('button');
+      const result = card.querySelector('.result');
+      const path = cinema + '/sessions/' + session.id;
+
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          if (label.hidden) {
+            const seats = await request(path + '/seats');
+            if (!seats.length) {
+              result.textContent = 'Свободных мест нет.';
+              return;
+            }
+            places.replaceChildren(...seats.map(seat => new Option(seat, seat)));
+            label.hidden = false;
+            result.textContent = 'Выберите места. Для нескольких мест удерживайте Ctrl.';
+          } else {
+            const seats = Array.from(places.selectedOptions, option => Number(option.value));
+            if (!seats.length) {
+              result.textContent = 'Выберите хотя бы одно место.';
+              return;
+            }
+            const booking = await request(path + '/book', {seats});
+            label.hidden = true;
+            result.textContent = 'Забронировано. Сумма ' + booking.amount + ' ₸.';
+            try {
+              const payment = await request('/api/pay', {amount: booking.amount});
+              result.textContent += ' Учебная оплата: ' + payment.transaction_id;
+            } catch (error) {
+              result.textContent += ' Ошибка учебной оплаты: ' + error.message;
+            }
+          }
+        } catch (error) {
+          result.textContent = 'Ошибка: ' + error.message;
+          label.hidden = true;
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      sessionList.append(card);
+    }
+
+    async function load() {
+      try {
+        const [movies, sessions] = await Promise.all([
+          request(cinema + '/movies'), request(cinema + '/sessions')
+        ]);
+        const titles = new Map(movies.map(movie => [movie.id, movie.title]));
+        for (const session of sessions) {
+          showSession(session, titles.get(session.movie_id) || 'Фильм #' + session.movie_id);
+        }
+        pageStatus.textContent = sessions.length ? '' : 'Сеансов пока нет.';
+      } catch (error) {
+        pageStatus.textContent = 'Не удалось загрузить афишу: ' + error.message;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

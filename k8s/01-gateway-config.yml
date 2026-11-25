@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: v3-cinema
+data:
+  default.conf: |
+    server {
+      listen 80;
+
+      location = /api/cinema {
+        proxy_pass http://cinema-api:8000/;
+      }
+
+      location /api/cinema/ {
+        proxy_pass http://cinema-api:8000/;
+      }
+
+      location = /api/pay {
+        proxy_pass http://payment-service:8000/pay;
+      }
+
+      location / {
+        proxy_pass http://cinema-frontend:80;
+      }
+    }
